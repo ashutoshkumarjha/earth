@@ -9,8 +9,9 @@
 var products = function() {
     "use strict";
 
-    var WEATHER_PATH = "/data/weather";
-    var OSCAR_PATH = "/data/oscar";
+    var WEATHER_PATH = "./data/weather";
+    var OSCAR_PATH = "./data/oscar";
+    var MOSDAC_PATH = "./data/mosdac";
     var catalogs = {
         // The OSCAR catalog is an array of file names, sorted and prefixed with yyyyMMdd. Last item is the
         // most recent. For example: [ 20140101-abc.json, 20140106-abc.json, 20140112-abc.json, ... ]
@@ -34,6 +35,35 @@ var products = function() {
         }, overrides);
     }
 
+    function buildMosdacProduct(overrides) {
+        return _.extend({
+            description: "",
+            paths: [],
+            date: null,
+            navigate: function(step) {
+                return mosdacStep(this.date, step);
+            },
+            load: function(cancel) {
+                var me = this;
+                return when.map(this.paths, µ.loadJson).then(function(files) {
+                    return cancel.requested ? null : _.extend(me, buildGrid(me.builder.apply(me, files)));
+                });
+            }
+        }, overrides);
+    }        
+        function decompressData(compressedData){
+        //Decode base64 string 
+        var strData     = atob(compressedData);
+        // Convert binary string to character-number array
+        var charData    = strData.split('').map(function(x){return x.charCodeAt(0);});
+       // Turn number array into byte-array
+        var binData     = new Uint8Array(charData);
+        // Pako magic
+        var data        = pako.inflate(binData,{to:'string'});
+        return(JSON.parse(data)); //decodeURIComponent(escape(data));
+        // Output to console
+    }
+    
     /**
      * @param attr
      * @param {String} type
@@ -43,10 +73,23 @@ var products = function() {
      */
     function gfs1p0degPath(attr, type, surface, level) {
         var dir = attr.date, stamp = dir === "current" ? "current" : attr.hour;
-        var file = [stamp, type, surface, level, "gfs", "1.0"].filter(µ.isValue).join("-") + ".json";
+        var file = [stamp, type, surface, level, "gfs", "1.0"].filter(µ.isValue).join("-") + ".epak";
         return [WEATHER_PATH, dir, file].join("/");
     }
 
+    /**
+     * @param attr
+     * @param {String} type
+     * @param {String?} surface
+     * @param {String?} level
+     * @returns {String}
+     */
+     function mosdac1p0degPath(attr, type, surface, level) {
+        var dir = attr.date, stamp = dir === "current" ? "current" : attr.hour;
+        var file = [stamp, type, "mosdac", "1.0"].filter(µ.isValue).join("-") + ".epak";
+        return [MOSDAC_PATH, dir, file].join("/");
+    }
+    
     function gfsDate(attr) {
         if (attr.date === "current") {
             // Construct the date from the current time, rounding down to the nearest three-hour block.
@@ -63,6 +106,11 @@ var products = function() {
      */
     function gfsStep(date, step) {
         var offset = (step > 1 ? 8 : step < -1 ? -8 : step) * 3, adjusted = new Date(date);
+        adjusted.setHours(adjusted.getHours() + offset);
+        return adjusted;
+    }
+    function mosdacStep(date, step) {
+        var offset = (step > 1 ? 48 : step < -1 ? -48 : step) * 0.5, adjusted = new Date(date);
         adjusted.setHours(adjusted.getHours() + offset);
         return adjusted;
     }
@@ -107,6 +155,8 @@ var products = function() {
         }
     }
 
+ 
+
     var FACTORIES = {
 
         "wind": {
@@ -122,7 +172,16 @@ var products = function() {
                     paths: [gfs1p0degPath(attr, "wind", attr.surface, attr.level)],
                     date: gfsDate(attr),
                     builder: function(file) {
-                        var uData = file[0].data, vData = file[1].data;
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                            var uData = file[0].data, vData = file[1].data;
+                        }else{
+                            var uData=decompressData(file[0].data),vData = decompressData(file[1].data);
+                        }
+                          //  console.log(uData.slice(0,10));
+                          //  console.log(vData.slice(0,10));
+                        
                         return {
                             header: file[0].header,
                             interpolate: bilinearInterpolateVector,
@@ -161,7 +220,14 @@ var products = function() {
                     paths: [gfs1p0degPath(attr, "temp", attr.surface, attr.level)],
                     date: gfsDate(attr),
                     builder: function(file) {
-                        var record = file[0], data = record.data;
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                             var record = file[0], data = record.data;
+                        }else{
+                            var record = file[0], data = decompressData(record.data);
+                        }
+                          //  console.log(data.slice(0,10));
                         return {
                             header: record.header,
                             interpolate: bilinearInterpolateScalar,
@@ -208,11 +274,20 @@ var products = function() {
                     paths: [gfs1p0degPath(attr, "relative_humidity", attr.surface, attr.level)],
                     date: gfsDate(attr),
                     builder: function(file) {
-                        var vars = file.variables;
-                        var rh = vars.Relative_humidity_isobaric || vars.Relative_humidity_height_above_ground;
-                        var data = rh.data;
+                        //var vars = file.variables;
+                        //var rh =  vars.Relative_humidity_isobaric || vars.Relative_humidity_height_above_ground ;
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                             var record = file[0], data = record.data;
+                        }else{
+                            var record = file[0], data = decompressData(record.data);
+                        }
+                          //  console.log(data.slice(0,10));
+
                         return {
-                            header: netcdfHeader(vars.time, vars.lat, vars.lon, file.Originating_or_generating_Center),
+                            //header: netcdfHeader(vars.time, vars.lat, vars.lon, file.Originating_or_generating_Center),
+                            header: record.header,
                             interpolate: bilinearInterpolateScalar,
                             data: function(i) {
                                 return data[i];
@@ -224,9 +299,23 @@ var products = function() {
                     ],
                     scale: {
                         bounds: [0, 100],
-                        gradient: function(v, a) {
-                            return µ.sinebowColor(Math.min(v, 100) / 100, a);
-                        }
+                        //gradient: function(v,a) {
+                            //return µ.sinebowColor(Math.min(v, 100) / 100, a);
+                             /* return  µ.segmentedColorScale(
+                                                         //[
+                                                         
+                                                         //]
+                                                         );
+                             */
+                           //   bounds: [193, 328],
+                        gradient: µ.segmentedColorScale([
+                                                         [0, [230, 165, 30]], 
+                                                         [25, [120, 100, 95]], 
+                                                         [60, [40, 44, 92]], 
+                                                         [75, [21, 13, 193]], 
+                                                         [90, [75, 63, 235]], 
+                                                         [100, [25, 255, 255]]
+                        ])
                     }
                 });
             }
@@ -334,7 +423,14 @@ var products = function() {
                     paths: [gfs1p0degPath(attr, "total_cloud_water")],
                     date: gfsDate(attr),
                     builder: function(file) {
-                        var record = file[0], data = record.data;
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                             var record = file[0], data = record.data;
+                        }else{
+                            var record = file[0], data = decompressData(record.data);
+                        }
+                          //  console.log(data.slice(0,10));
                         return {
                             header: record.header,
                             interpolate: bilinearInterpolateScalar,
@@ -347,7 +443,7 @@ var products = function() {
                         {label: "kg/m²", conversion: function(x) { return x; }, precision: 3}
                     ],
                     scale: {
-                        bounds: [0, 1],
+                        bounds: [0, 2],
                         gradient: µ.segmentedColorScale([
                             [0.0, [5, 5, 89]],
                             [0.2, [170, 170, 230]],
@@ -371,7 +467,14 @@ var products = function() {
                     paths: [gfs1p0degPath(attr, "total_precipitable_water")],
                     date: gfsDate(attr),
                     builder: function(file) {
-                        var record = file[0], data = record.data;
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                             var record = file[0], data = record.data;
+                        }else{
+                            var record = file[0], data = decompressData(record.data);
+                        }
+                            console.log(data.slice(0,10));
                         return {
                             header: record.header,
                             interpolate: bilinearInterpolateScalar,
@@ -413,7 +516,14 @@ var products = function() {
                     paths: [gfs1p0degPath(attr, "mean_sea_level_pressure")],
                     date: gfsDate(attr),
                     builder: function(file) {
-                        var record = file[0], data = record.data;
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                             var record = file[0], data = record.data;
+                        }else{
+                            var record = file[0], data = decompressData(record.data);
+                        }
+                          //  console.log(data.slice(0,10));
                         return {
                             header: record.header,
                             interpolate: bilinearInterpolateScalar,
@@ -461,7 +571,15 @@ var products = function() {
                             return oscarStep(catalog, this.date, step);
                         },
                         builder: function(file) {
-                            var uData = file[0].data, vData = file[1].data;
+                            var filepath=this['paths'].toString();
+                            var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                            if (filenameWithExtension=="json"){
+                                var uData = file[0].data, vData = file[1].data;
+                            }else{
+                                var uData=decompressData(file[0].data),vData = decompressData(file[1].data);
+                            }
+                          //  console.log(uData.slice(0,10));
+                          //  console.log(vData.slice(0,10));
                             return {
                                 header: file[0].header,
                                 interpolate: bilinearInterpolateVector,
@@ -490,6 +608,92 @@ var products = function() {
                         },
                         particles: {velocityScale: 1/4400, maxIntensity: 0.7}
                     });
+                });
+            }
+        },
+
+        "tir1": {
+            matches: _.matches({param: "wind", overlayType: "tir1"}),
+            create: function(attr) {
+                return buildMosdacProduct({
+                    field: "scalar",
+                    type: "tir1",
+                    description: localize({
+                        name: {en: "TIR1", ja: "TIR1"},
+                        qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    }),
+                    paths: [mosdac1p0degPath(attr, "tir1", attr.surface, attr.level)],
+                    date: gfsDate(attr),
+                    builder: function(file) {
+                        var filepath=this['paths'].toString();
+                        var filenameWithExtension = filepath.replace(/^.*[\\\/]/, '').split('.').pop().toString();
+                        if (filenameWithExtension=="json"){
+                             var record = file[0], data = record.data;
+                        }else{
+                            var record = file[0], data = decompressData(record.data);
+                        }
+                        //var record = file[0], data = record.data;
+                        return {
+                            header: record.header,
+                            interpolate: bilinearInterpolateScalar,
+                            data: function(i) {
+                                return data[i];
+                            }
+                        }
+                    },
+                    units: [
+                        {label: "°K", conversion: function(x) {
+                                
+                                var cwl=1.08288e-5;
+                                var h = 6.6260755e-34;
+                                var c = 2.9979246e+8;
+                                var k = 1.380658e-23;
+                                var lab_radiance_add_offset=-2.0775e-2;
+                                var lab_radiance_quad=-3.8403e-7;
+                                var lab_radiance_scale_factor_gsics=1.6076e-3;
+                                var lab_radiance_add_offset_gsics=-1.98532e-1;
+                                var lab_radiance_quad_gsics=-6.02552e-7;
+                                var lab_radiance_scale_factor=2.5223501e-3;
+                                
+                                var count=1023-x;
+                                //DN to radiance conversion
+                                var rad_w_m2=(lab_radiance_quad*count*count+lab_radiance_scale_factor*count+lab_radiance_add_offset)*10;
+                                
+                                var rad_w_m2_gsics=(lab_radiance_quad*count*count+lab_radiance_scale_factor*count+lab_radiance_add_offset)*10;
+                                
+                                //console.log(rad_w_m2_gsics)
+                                //Radiance to Brightness Temprature
+                                var C1 = 2.0*h*c*c;
+                                var C2 = (h*c)/k;
+/*                              var C1dash=C1/(1.0e6*rad_w_m2*Math.pow(cwl,5))+1;
+                                var logofC1Dash=Math.log(C1dash);
+                                var BT=C2/(cwl*logofC1Dash); */
+                                var BT=C2/(cwl*Math.log(C1/(1.0e6*rad_w_m2_gsics*Math.pow(cwl,5))+1));
+                                if (isNaN(BT) || BT<180.089) {BT=180.089}
+                                if (BT>340.07623) {BT=340.07623}
+                                
+                                return BT; },      precision: 1},
+                        {label: "DN", conversion: function(x) { return x; },       precision: 1},
+                        {label: "mWcm-2sr-1µ-1", conversion: function(x) { 
+                                var lab_radiance_add_offset=-2.0775e-2;
+                                var lab_radiance_quad=-3.8403e-7;
+                                var lab_radiance_scale_factor_gsics=1.6076e-3;
+                                var lab_radiance_add_offset_gsics=-1.98532e-1;
+                                var lab_radiance_quad_gsics=-6.02552e-7;
+                                var lab_radiance_scale_factor=2.5223501e-3;
+                                var count=1023-x
+                                /* var (rad_w_m2=lab_radiance_quad*count*count+lab_radiance_scale_factor*count+lab_radiance_add_offset) */
+                                var rad_w_m2_gsics=(lab_radiance_quad*count*count+lab_radiance_scale_factor*count+lab_radiance_add_offset)*10;
+                                //return rad_w_m2;
+                                return rad_w_m2_gsics; },      precision: 3},
+                    ],
+                    scale: {
+                        bounds: [350, 1023],
+                        gradient: function(v, a) {
+			    //return µ.sinebowColor(Math.min(v, 1024) / 512, ((v-350)/1023)*255);
+                            return µ.grayColor(Math.min(v, 1024) / 1024, a);
+                        }
+                    }
                 });
             }
         },

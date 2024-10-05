@@ -12,7 +12,7 @@ var µ = function() {
     var τ = 2 * Math.PI;
     var H = 0.0000360;  // 0.0000360°φ ~= 4m
     var DEFAULT_CONFIG = "current/wind/surface/level/orthographic";
-    var TOPOLOGY = isMobile() ? "/data/earth-topo-mobile.json?v2" : "/data/earth-topo.json?v2";
+    var TOPOLOGY = isMobile() ? "./data/earth-topo-mobile.json?v2" : "./data/earth-topo.json?v2";
 
     /**
      * @returns {Boolean} true if the specified value is truthy.
@@ -116,14 +116,16 @@ var µ = function() {
         return date.getUTCFullYear() + "-" +
             zeroPad(date.getUTCMonth() + 1, 2) + "-" +
             zeroPad(date.getUTCDate(), 2) + " " +
-            zeroPad(date.getUTCHours(), 2) + ":00";
+            zeroPad(date.getUTCHours(), 2) + ":"+
+            zeroPad(date.getUTCMinutes(), 2) ;
     }
 
     function toLocalISO(date) {
         return date.getFullYear() + "-" +
             zeroPad(date.getMonth() + 1, 2) + "-" +
             zeroPad(date.getDate(), 2) + " " +
-            zeroPad(date.getHours(), 2) + ":00";
+            zeroPad(date.getHours(), 2) + ":"+
+	    zeroPad(date.getMinutes(), 2) ;
     }
 
     /**
@@ -147,7 +149,13 @@ var µ = function() {
     }
 
     function dateToConfig(date) {
-        return {date: µ.dateToUTCymd(date, "/"), hour: µ.zeroPad(date.getUTCHours(), 2) + "00"};
+        let mins = date.getUTCMinutes()/60;
+        if(mins>=0.5){
+            mins = "30";
+        }else{
+            mins = "00";
+        }
+        return {date: µ.dateToUTCymd(date, "/"), hour: µ.zeroPad(date.getUTCHours(), 2) + mins};
     }
 
     /**
@@ -223,6 +231,22 @@ var µ = function() {
         return [r, g, b, a];
     }
 
+    function grayColor(hue, a) {
+        // Map hue [0, 1] to radians [0, 5/6τ]. Don't allow a full rotation because that keeps hue == 0 and
+        // hue == 1 from mapping to the same color.
+        var rad = hue * τ * 5/6;
+        rad *= 0.75;  // increase frequency to 2/3 cycle per rad
+
+        var s = Math.sin(rad);
+        var c = Math.cos(rad);
+        var r = Math.floor(Math.max(0, -c) * 255);
+        var g = Math.floor(Math.max(s, 0) * 255);
+        var b = Math.floor(Math.max(c, 0, -s) * 255);
+        let lum = .2126 * r + .7152 * g + .0722 * b;
+        lum = Math.floor(255-lum); 
+        return [lum, lum, lum, a];
+    }
+
     var BOUNDARY = 0.45;
     var fadeToWhite = colorInterpolator(sinebowColor(1.0, 0), [255, 255, 255]);
 
@@ -289,6 +313,53 @@ var µ = function() {
             return interpolators[i](µ.proportion(point, range[0], range[1]), alpha);
         };
     }
+
+       //AKJ
+    function Ic(t, n) {
+        return function(t) {
+                if (Array.isArray(t))
+                    return t
+            }(t) || function(t, n) {
+                var e = [],
+                    r = !0,
+                    i = !1,
+                    o = void 0;
+                try {
+                    for (var a, u = t[Symbol.iterator](); !(r = (a = u.next()).done) && (e.push(a.value), !n || e.length !== n); r = !0)
+                        ;
+                } catch (t) {
+                    i = !0, o = t
+                } finally {
+                    try {
+                        r || null == u.return || u.return()
+                    } finally {
+                        if (i)
+                            throw o
+                    }
+                }
+                return e
+            }(t, n) || function() {
+                throw new TypeError("Invalid attempt to destructure non-iterable instance")
+            }()
+    }
+
+    function qc(t, n) {
+        var e = Ic(t, 3),
+            r = e[0],
+            i = e[1],
+            a = e[2],
+            u = n[0] - r,
+            c = n[1] - i,
+            l = n[2] - a;
+        return function(t) {
+            return [Math.floor(r + t * u), Math.floor(i + t * c), Math.floor(a + t * l)].map(function(t) {
+                return Object(o.a)(t, 0, 255)
+            })
+        }
+    }
+
+
+    //AKJ
 
     /**
      * Returns a human readable string for the provided coordinates.
@@ -644,6 +715,7 @@ var µ = function() {
         clearCanvas: clearCanvas,
         sinebowColor: sinebowColor,
         extendedSinebowColor: extendedSinebowColor,
+        grayColor: grayColor,
         windIntensityColorScale: windIntensityColorScale,
         segmentedColorScale: segmentedColorScale,
         formatCoordinates: formatCoordinates,

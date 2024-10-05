@@ -159,7 +159,7 @@
         var signalEnd = _.debounce(function() {
             if (!op || op.type !== "drag" && op.type !== "zoom") {
                 configuration.save({orientation: globe.orientation()}, {source: "moveEnd"});
-                dispatch.trigger("moveEnd");
+                //dispatch.trigger("moveEnd");
             }
         }, MOVE_END_WAIT);  // wait for a bit to decide if user has stopped moving the globe
 
@@ -271,7 +271,7 @@
             log.debug("Download in progress--ignoring nav request.");
             return;
         }
-        var next = gridAgent.value().primaryGrid.navigate(step);
+        var next = gridAgent.value().overlayGrid.navigate(step);
         if (next) {
             configuration.save(µ.dateToConfig(next));
         }
@@ -673,12 +673,52 @@
         if (grid) {
             // Draw color bar for reference.
             var colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
-            var c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
+            var noOflabels=4 //AKJ
+            var pixelOffset=50 //AKJ
+            //var pixelOffset=50/2 //AKJ
+            var c = colorBar.node(), g = c.getContext("2d"), n = c.width-pixelOffset;
+            c.height = 72 //AKJ
+            //c.height = 72/2 //AKJ
+
             for (var i = 0; i <= n; i++) {
                 var rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
                 g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
-                g.fillRect(i, 0, 1, c.height);
+                g.fillRect(i, c.height/2, 1, c.height/2);
             }
+            //AKJ START
+            // Draw color bar legend reference.
+            var elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
+            var units = createUnitToggle(elementId, grid).value();
+            var maxValue=µ.formatScalar(bounds[1], units)
+            var pct , lableValue
+            for (var i = 0; i <= n; i++) {                //AKJ
+                if(i%Math.floor(n/noOflabels)==0){
+                    g.save();
+                    g.fillStyle = "rgb(255,255,255)";
+                    g.textBaseline = "bottom";
+                    g.font = "bold 20px Arial";
+                    //g.font = "bold 10px Arial";
+                    //var pct = µ.clamp((i - 2) / (n - 2), 0, 1);
+                    pct = µ.clamp((i) / (n), 0, 1);
+                    lableValue = µ.spread(pct, bounds[0], bounds[1]);
+                    lableValue = µ.formatScalar(lableValue, units)
+                    lableValue = (maxValue>9 && units.precision < 3 ) ? Math.floor(lableValue) : parseFloat(lableValue).toFixed(2); 
+                    g.fillText(lableValue, i, c.height/2);
+                    g.restore();
+                    //console.log("HI"+maxValue+lableValue)
+                }
+            }
+            //AKJ END
+            //AKJ START
+            // Draw Unit at bar legend rightsides.
+            g.save();
+            g.fillStyle = "rgb(255,255,255)";
+            g.textBaseline = "bottom";
+            g.font = "bold 18px Arial";
+            //g.font = "bold 8px Arial";
+            g.fillText(units.label, n+3, 3.5*c.height/4);
+            g.restore();
+            //AKJ END
 
             // Show tooltip on hover.
             colorBar.on("mousemove", function() {
@@ -889,7 +929,8 @@
         // Adjust size of the scale canvas to fill the width of the menu to the right of the label.
         var label = d3.select("#scale-label").node();
         d3.select("#scale")
-            .attr("width", (d3.select("#menu").node().offsetWidth - label.offsetWidth) * 0.97)
+            .attr("width", (800 - label.offsetWidth) * 0.5)
+            //.attr("width", (d3.select("#menu").node().offsetWidth - label.offsetWidth) * 0.97)
             .attr("height", label.offsetHeight / 2);
 
         d3.select("#show-menu").on("click", function() {
